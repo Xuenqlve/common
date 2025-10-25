@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -19,6 +20,7 @@ const (
 // 如果 left > right 返回 Greater
 // 如果 left == right 返回 Equal
 // 如果 left < right 返回 Less
+
 func Compare(left, right any) (int, error) {
 	// 处理nil值
 	if left == nil && right == nil {
@@ -137,6 +139,46 @@ func Compare(left, right any) (int, error) {
 	}
 }
 
+func CompareKey(left, right any) (int, error) {
+	left = convertType(left)
+	right = convertType(right)
+	aType := reflect.TypeOf(left)
+	bType := reflect.TypeOf(right)
+	if aType != bType {
+		return 0, errors.Errorf("[CompareKey] type error left:%v type %v , right:%v type %v", left, aType, right, bType)
+	}
+	switch v := left.(type) {
+	case uint64:
+		rightInt, ok := right.(uint64)
+		if !ok {
+			return 0, errors.Errorf("right.(int) error type:%s", reflect.TypeOf(right))
+		}
+		return CompareUInt(v, rightInt), nil
+	case int64:
+		rightInt, ok := right.(int64)
+		if !ok {
+			return 0, errors.Errorf("right.(int) error type:%s", reflect.TypeOf(right))
+		}
+		return CompareInt(v, rightInt), nil
+	case string:
+		return strings.Compare(v, right.(string)), nil
+	case float64:
+		rightFloat, ok := right.(float64)
+		if !ok {
+			return 0, errors.Errorf("right.(float64) error type:%s", reflect.TypeOf(right))
+		}
+		return CompareFloat(v, rightFloat), nil
+	case bool:
+		rightBool, ok := right.(bool)
+		if !ok {
+			return 0, errors.Errorf("right.(bool) error type:%s", reflect.TypeOf(right))
+		}
+		return CompareBool(v, rightBool), nil
+	default:
+		return 0, errors.Errorf("不支持的类型 left Type:%s right Type:%s", reflect.TypeOf(left), reflect.TypeOf(right))
+	}
+}
+
 // compareOrdered 比较可排序的值
 func compareOrdered[T ~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~float32 | ~float64](a, b T) int {
 	if a > b {
@@ -232,33 +274,6 @@ func compareWithReflect(left, right any) (int, error) {
 	return strings.Compare(leftStr, rightStr), nil
 }
 
-func convertType(a any) any {
-	switch v := a.(type) {
-	case int:
-		return int64(v)
-	case int8:
-		return int64(v)
-	case int16:
-		return int64(v)
-	case int32:
-		return int64(v)
-	case int64:
-		return v
-	case uint:
-		return uint64(v)
-	case uint8:
-		return uint64(v)
-	case uint16:
-		return uint64(v)
-	case uint32:
-		return uint64(v)
-	case uint64:
-		return v
-	default:
-		return a
-	}
-}
-
 func CompareInt(a, b int64) int {
 	if a > b {
 		return Greater
@@ -274,6 +289,86 @@ func CompareUInt(a, b uint64) int {
 		return Greater
 	} else if a == b {
 		return Equal
+	} else {
+		return Less
+	}
+}
+
+func convertType(a interface{}) interface{} {
+	// TODO 防止传入负整数
+	switch v := a.(type) {
+	case int8:
+		return uint64(v)
+	case int16:
+		return uint64(v)
+	case int32:
+		return uint64(v)
+	case int64:
+		return uint64(v)
+	case uint8:
+		return uint64(v)
+	case uint16:
+		return uint64(v)
+	case uint32:
+		return uint64(v)
+	case uint64:
+		return v
+	// 处理 SQL null 类型
+	case sql.NullString:
+		if v.Valid {
+			return v.String
+		}
+		return ""
+	case sql.NullInt64:
+		if v.Valid {
+			return uint64(v.Int64)
+		}
+		return uint64(0)
+	case sql.NullInt32:
+		if v.Valid {
+			return uint64(v.Int32)
+		}
+		return uint64(0)
+	case sql.NullInt16:
+		if v.Valid {
+			return uint64(v.Int16)
+		}
+		return uint64(0)
+	case sql.NullByte:
+		if v.Valid {
+			return uint64(v.Byte)
+		}
+		return uint64(0)
+	case sql.NullFloat64:
+		if v.Valid {
+			return v.Float64
+		}
+		return float64(0)
+	case sql.NullBool:
+		if v.Valid {
+			return v.Bool
+		}
+		return false
+	default:
+		return a
+	}
+}
+
+func CompareFloat(a, b float64) int {
+	if a > b {
+		return Greater
+	} else if a == b {
+		return Equal
+	} else {
+		return Less
+	}
+}
+
+func CompareBool(a, b bool) int {
+	if a == b {
+		return Equal
+	} else if a {
+		return Greater // true > false
 	} else {
 		return Less
 	}

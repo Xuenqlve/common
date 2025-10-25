@@ -2,8 +2,9 @@ package chunk
 
 import (
 	"fmt"
-	"github.com/xuenqlve/timburr/pkg/tool/sql_tool"
 	"strings"
+
+	sql_tool "github.com/xuenqlve/common/sql"
 )
 
 const (

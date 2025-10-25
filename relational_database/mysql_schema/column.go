@@ -76,3 +76,10 @@ func Deserialize(raw any, column Column) any {
 func GenerateGuideKeys(guideColumns []string, rowData map[string]any) (map[string]any, string, error) {
 	return sql.GenerateGuideKeys(guideColumns, rowData)
 }
+
+type DefaultStruct struct{}
+
+func IsColumnSetDefault(v any) bool {
+	_, ok := v.(DefaultStruct)
+	return ok
+}
