@@ -5,16 +5,90 @@ import (
 	"strings"
 
 	"github.com/xuenqlve/common/errors"
-	"github.com/xuenqlve/common/relational_database/mysql_schema"
+	"github.com/xuenqlve/common/relational_database/mysql"
 	sql_tool "github.com/xuenqlve/common/sql"
 )
 
-type MySQLSQLExecution struct {
-	Statement string
-	Args      []any
+func GenerateDeleteSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	var deleteInFlag bool
+	var guideKey string
+
+	if len(rows) == 0 {
+		return "", nil, fmt.Errorf("no guide")
+	}
+	guideKeys := rows[0].GuideKeys
+	if len(guideKeys) == 1 {
+		deleteInFlag = true
+		for key := range guideKeys {
+			guideKey = sql_tool.ColumnName(key)
+		}
+	}
+	batchStatement := make([]string, 0, len(rows))
+	args = []any{}
+	for _, msgContent := range rows {
+		stmts, params := analysisDeleteArgs(msgContent.GuideKeys, deleteInFlag)
+		args = append(args, params...)
+		batchStatement = append(batchStatement, stmts...)
+	}
+	if deleteInFlag {
+		statement = generateDeleteSQLSingleKey(tableDef, guideKey, batchStatement)
+	} else {
+		statement = generateDeleteSQLComplexKey(tableDef, batchStatement)
+	}
+	return statement, args, nil
 }
 
-func AnalysisDeleteArgs(guideKeys map[string]any, inFlag bool) (statement []string, args []any, err error) {
+func GenerateInsertSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, false)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateInsertSQL(tableDef, batchPlaceHolders), args, nil
+}
+
+func GenerateInsertSectionSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	msgData := rows[0].Data
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, true)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateInsertSectionSQL(tableDef, msgData, batchPlaceHolders), args, nil
+}
+
+func GenerateInsertIgnoreSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, false)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateInsertIgnoreSQL(tableDef, batchPlaceHolders), args, nil
+}
+
+func GenerateInsertOnDuplicateKeyUpdateSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, false)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateInsertOnDuplicateKeyUpdateSQL(tableDef, batchPlaceHolders), args, nil
+}
+
+func GenerateInsertUpdateSectionSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	msgData := rows[0].Data
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, true)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateInsertUpdateSectionSQL(tableDef, msgData, batchPlaceHolders), args, nil
+}
+
+func GenerateReplaceSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement string, args []any, err error) {
+	batchPlaceHolders, args, err := placeHoldersAndArgsFromEncodedData(rows, tableDef, false)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return generateReplaceSQL(tableDef, batchPlaceHolders), args, nil
+}
+
+func analysisDeleteArgs(guideKeys map[string]any, inFlag bool) (statement []string, args []any) {
 	whereStatement := make([]string, 0, len(guideKeys))
 	args = make([]any, 0, len(guideKeys))
 	for key, value := range guideKeys {
@@ -26,44 +100,72 @@ func AnalysisDeleteArgs(guideKeys map[string]any, inFlag bool) (statement []stri
 		}
 		args = append(args, value)
 	}
-	return whereStatement, args, nil
+
+	if inFlag {
+		return whereStatement, args
+	} else {
+		return []string{fmt.Sprintf("(%s)", strings.Join(whereStatement, " AND "))}, args
+	}
 }
 
-func GenerateDeleteSQLComplexKey(tableDef *mysql_schema.Table, whereStatement []string) string {
+func generateDeleteSQLComplexKey(tableDef *mysql.Table, whereStatement []string) string {
 	batchStatement := []string{}
 	batchStatement = append(batchStatement, fmt.Sprintf("(%s)", strings.Join(whereStatement, " AND ")))
 	return fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE %s ", tableDef.Database, tableDef.Table, strings.Join(batchStatement, " OR "))
 }
 
-func GenerateDeleteSQLSingleKey(tableDef *mysql_schema.Table, guideKey string, whereStatement []string) string {
+func generateDeleteSQLSingleKey(tableDef *mysql.Table, guideKey string, whereStatement []string) string {
 	return fmt.Sprintf("DELETE FROM `%s`.`%s` WHERE %s in (%s) ", tableDef.Database, tableDef.Table, guideKey, strings.Join(whereStatement, ","))
 }
 
-func GenerateInsertSQL(tableDef *mysql_schema.Table, batchPlaceHolders []string) string {
+func placeHoldersAndArgsFromEncodedData(msgBatch []mysql.RowData, tableDef *mysql.Table, bySource bool) ([]string, []any, error) {
+	var batchPlaceHolders []string
+	var batchArgs []any
+	msgLen := len(msgBatch[0].Data)
+
+	for _, msg := range msgBatch {
+		if msg.Data == nil {
+			return nil, nil, errors.Errorf("Data and MysqlRawBytes are null")
+		}
+
+		singleSqlPlaceHolders, singleSqlArgs, err := getSingleSqlPlaceHolderAndArgWithEncodedData(msg.Data, tableDef, bySource)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		batchPlaceHolders = append(batchPlaceHolders, singleSqlPlaceHolders)
+		if len(singleSqlArgs) != msgLen {
+			return nil, nil, fmt.Errorf("single sql args does not match message length")
+		}
+		batchArgs = append(batchArgs, singleSqlArgs...)
+	}
+	return batchPlaceHolders, batchArgs, nil
+}
+
+func generateInsertSQL(tableDef *mysql.Table, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s", insertSqlPrefix(tableDef), strings.Join(batchPlaceHolders, ","))
 }
 
-func GenerateInsertSectionSQL(tableDef *mysql_schema.Table, data map[string]any, batchPlaceHolders []string) string {
+func generateInsertSectionSQL(tableDef *mysql.Table, data map[string]any, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s", insertSqlPrefixByMessage(tableDef, data), strings.Join(batchPlaceHolders, ","))
 }
 
-func GenerateInsertIgnoreSQL(tableDef *mysql_schema.Table, batchPlaceHolders []string) string {
+func generateInsertIgnoreSQL(tableDef *mysql.Table, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s", insertIgnoreSqlPrefix(tableDef), strings.Join(batchPlaceHolders, ","))
 }
 
-func GenerateInsertOnDuplicateKeyUpdateSQL(tableDef *mysql_schema.Table, batchPlaceHolders []string) string {
+func generateInsertOnDuplicateKeyUpdateSQL(tableDef *mysql.Table, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s %s", insertSqlPrefix(tableDef), strings.Join(batchPlaceHolders, ","), onDuplicateKeyUpdateSQLSuffix(tableDef))
 }
 
-func GenerateInsertUpdateSectionSQL(tableDef *mysql_schema.Table, data map[string]any, batchPlaceHolders []string) string {
+func generateInsertUpdateSectionSQL(tableDef *mysql.Table, data map[string]any, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s %s", insertSqlPrefixByMessage(tableDef, data), strings.Join(batchPlaceHolders, ","), onDuplicateKeyUpdateSQLSuffixByMessage(tableDef, data))
 }
 
-func GenerateReplaceSQL(tableDef *mysql_schema.Table, batchPlaceHolders []string) string {
+func generateReplaceSQL(tableDef *mysql.Table, batchPlaceHolders []string) string {
 	return fmt.Sprintf("%s %s", replaceSqlPrefix(tableDef), strings.Join(batchPlaceHolders, ","))
 }
 
-func insertSqlPrefixByMessage(tableDef *mysql_schema.Table, msgData map[string]any) string {
+func insertSqlPrefixByMessage(tableDef *mysql.Table, msgData map[string]any) string {
 	columnNames := make([]string, 0, len(tableDef.Columns))
 	for _, column := range tableDef.Columns {
 		columnName := column.Name
@@ -75,7 +177,7 @@ func insertSqlPrefixByMessage(tableDef *mysql_schema.Table, msgData map[string]a
 	return fmt.Sprintf("INSERT INTO `%s`.`%s` (%s) VALUES", tableDef.Database, tableDef.Table, strings.Join(columnNames, ","))
 }
 
-func insertSqlPrefix(tableDef *mysql_schema.Table) string {
+func insertSqlPrefix(tableDef *mysql.Table) string {
 	columnNames := make([]string, 0, len(tableDef.Columns))
 	for _, column := range tableDef.Columns {
 		columnName := column.Name
@@ -84,7 +186,7 @@ func insertSqlPrefix(tableDef *mysql_schema.Table) string {
 	return fmt.Sprintf("INSERT INTO `%s`.`%s` (%s) VALUES", tableDef.Database, tableDef.Table, strings.Join(columnNames, ","))
 }
 
-func insertIgnoreSqlPrefix(tableDef *mysql_schema.Table) string {
+func insertIgnoreSqlPrefix(tableDef *mysql.Table) string {
 	columnNames := make([]string, 0, len(tableDef.Columns))
 	for _, column := range tableDef.Columns {
 		columnName := column.Name
@@ -93,7 +195,7 @@ func insertIgnoreSqlPrefix(tableDef *mysql_schema.Table) string {
 	return fmt.Sprintf("INSERT IGNORE INTO `%s`.`%s` (%s) VALUES", tableDef.Database, tableDef.Table, strings.Join(columnNames, ","))
 }
 
-func replaceSqlPrefix(tableDef *mysql_schema.Table) string {
+func replaceSqlPrefix(tableDef *mysql.Table) string {
 	columnNames := make([]string, 0, len(tableDef.Columns))
 	for _, column := range tableDef.Columns {
 		columnName := column.Name
@@ -102,7 +204,7 @@ func replaceSqlPrefix(tableDef *mysql_schema.Table) string {
 	return fmt.Sprintf("REPLACE INTO `%s`.`%s` (%s) VALUES", tableDef.Database, tableDef.Table, strings.Join(columnNames, ","))
 }
 
-func onDuplicateKeyUpdateSQLSuffix(tableDef *mysql_schema.Table) string {
+func onDuplicateKeyUpdateSQLSuffix(tableDef *mysql.Table) string {
 	columnNamesAssign := make([]string, 0, len(tableDef.Columns))
 	if len(tableDef.UniqueIndex) == 0 {
 		return ""
@@ -118,7 +220,7 @@ func onDuplicateKeyUpdateSQLSuffix(tableDef *mysql_schema.Table) string {
 	return fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(columnNamesAssign, ","))
 }
 
-func onDuplicateKeyUpdateSQLSuffixByMessage(tableDef *mysql_schema.Table, msgData map[string]any) string {
+func onDuplicateKeyUpdateSQLSuffixByMessage(tableDef *mysql.Table, msgData map[string]any) string {
 	columnNamesAssign := make([]string, 0, len(tableDef.Columns))
 	if len(tableDef.UniqueIndex) == 0 {
 		return ""
@@ -137,7 +239,7 @@ func onDuplicateKeyUpdateSQLSuffixByMessage(tableDef *mysql_schema.Table, msgDat
 	return fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(columnNamesAssign, ","))
 }
 
-func GetSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef *mysql_schema.Table, bySource bool) (string, []any, error) {
+func getSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef *mysql.Table, bySource bool) (string, []any, error) {
 	if err := validateSchema(data, tableDef); err != nil && !bySource {
 		return "", nil, errors.Trace(err)
 	}
@@ -153,7 +255,7 @@ func GetSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef 
 			}
 			return "", nil, errors.Errorf("db:%s, table:%s, column:%s missing data", tableDef.Database, tableDef.Table, columnName)
 		}
-		if column.IsGenerated && mysql_schema.IsColumnSetDefault(columnData) {
+		if column.IsGenerated && mysql.IsColumnSetDefault(columnData) {
 			placeHolders = append(placeHolders, "DEFAULT")
 			continue
 		}
@@ -165,7 +267,7 @@ func GetSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef 
 	return singleSqlPlaceHolder, args, nil
 }
 
-func validateSchema(data map[string]any, tableDef *mysql_schema.Table) error {
+func validateSchema(data map[string]any, tableDef *mysql.Table) error {
 	columnLenInMsg := len(data)
 	columnLenInTarget := len(tableDef.Columns)
 
@@ -176,12 +278,12 @@ func validateSchema(data map[string]any, tableDef *mysql_schema.Table) error {
 	return nil
 }
 
-func adjustArgs(arg any, column *mysql_schema.Column) any {
+func adjustArgs(arg any, column *mysql.Column) any {
 	if arg == nil {
 		return arg
 	}
-	if column.Type == mysql_schema.TypeDatetime || column.Type == mysql_schema.TypeTimestamp || column.Type == mysql_schema.TypeDate { // datetime is in utc and should ignore location
-		v, flag := mysql_schema.ParseTime(arg, column.Type)
+	if column.Type == mysql.TypeDatetime || column.Type == mysql.TypeTimestamp || column.Type == mysql.TypeDate { // datetime is in utc and should ignore location
+		v, flag := mysql.ParseTime(arg, column.Type)
 		if flag {
 			return v.Format("2006-01-02 15:04:05.999999999")
 		}

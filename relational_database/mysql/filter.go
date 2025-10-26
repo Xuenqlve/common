@@ -1,4 +1,4 @@
-package mysql_schema
+package mysql
 
 import (
 	"database/sql"
