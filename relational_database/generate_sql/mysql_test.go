@@ -123,7 +123,46 @@ func TestGenerateSQL(t *testing.T) {
 		t.Logf("sql:%v args:%v", sql, args)
 	})
 
-	t.Run("update", func(t *testing.T) {
-		GenerateInsertOnDuplicateKeyUpdateSQL()
+	t.Run("insert on duplicate key", func(t *testing.T) {
+		statement, args, err := GenerateInsertOnDuplicateKeyUpdateSQL([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4, "create_time": "2022-01-01T00:00:00Z"}},
+		}, tableDef)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		t.Logf("sql:%v args:%v", statement, args)
 	})
+
+	t.Run("insert update section", func(t *testing.T) {
+		statement, args, err := GenerateInsertUpdateSectionSQL([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4}},
+		}, tableDef)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		t.Logf("sql:%v args:%v", statement, args)
+	})
+
+	t.Run("replace", func(t *testing.T) {
+		statement, args, err := GenerateReplaceSQL([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4, "create_time": "2022-01-01T00:00:00Z"}},
+		}, tableDef)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		t.Logf("sql:%v args:%v", statement, args)
+	})
+
 }
