@@ -24,18 +24,6 @@ func (l *oplogDDLLoader) Parse(ddl ddl_parser.DDL) ([]ddl_parser.Statement, erro
 }
 func (l *oplogDDLLoader) makeStatement(event oplog.Event) ([]ddl_parser.Statement, error) {
 	switch event.OperationType {
-	//case schema_store.Create.String():
-	//	database, table, err := oplog.SplitNamespace(event.Ns)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	md := ddl_parser.Metadata{
-	//		Database: fmt.Sprintf("%v", database),
-	//		Table:    fmt.Sprintf("%v", table),
-	//	}
-	//	return []ddl_parser.Statement{
-	//		ddl_parser.NewTableStatement(newOplogDDLStatement(schema_store.Create, event.FullDocument, md), md.Database, false, md.Table),
-	//	}, nil
 	case schema_store.Create_Indexes.String():
 		database, table, err := oplog.SplitNamespace(event.Ns)
 		if err != nil {
