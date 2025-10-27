@@ -1,8 +1,6 @@
 package mysql
 
-import (
-	"fmt"
-)
+import "fmt"
 
 type RowData struct {
 	Key       string         `json:"key" c:"key"`
