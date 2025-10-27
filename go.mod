@@ -1,11 +1,11 @@
 module github.com/xuenqlve/common
 
-go 1.24.9
+go 1.23.3
 
 require (
 	github.com/go-mysql-org/go-mysql v1.13.0
 	github.com/pingcap/errors v0.11.5-0.20250523034308-74f78ae071ee
-	github.com/pingcap/tidb/pkg/parser v0.0.0-20251024054113-0982aded20e8
+	github.com/pingcap/tidb/pkg/parser v0.0.0-20251027035913-edabae3a31a6
 	github.com/rs/zerolog v1.34.0
 	github.com/satori/go.uuid v1.2.0
 	go.mongodb.org/mongo-driver v1.17.4
@@ -35,6 +35,5 @@ require (
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.23.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
