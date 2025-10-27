@@ -1,0 +1,13 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.vscode
+
+*.test
+
+*.out
+
+
+
