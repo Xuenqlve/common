@@ -87,7 +87,11 @@ func (r *EventReader) ensureNetwork() (err error) {
 	if r.client != nil {
 		return nil
 	}
-	r.client, err = MongoDBStreamConn(r.ctx, r.cfg.DataSource, DefaultReaderFetchBatchSize, r.startAtOperationTime)
+	connect, err := r.cfg.connect()
+	if err != nil {
+		return err
+	}
+	r.client, err = MongoDBStreamConn(r.ctx, connect, DefaultReaderFetchBatchSize, r.startAtOperationTime)
 	if err != nil {
 		return err
 	}

@@ -3,10 +3,14 @@ package oplog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/xuenqlve/common/errors"
 	"github.com/xuenqlve/common/log"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 	//input_metrics "github.com/xuenqlve/timburr/pkg/metrics/input"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,12 +18,60 @@ import (
 )
 
 type ReaderConfig struct {
-	DataSource       string   `mapstructure:"data-source" json:"data-source"`
+	Host             []string `mapstructure:"urls" json:"urls" toml:"urls" yaml:"urls"`
+	ReplicaSet       string   `mapstructure:"replica-set" json:"replica-set" toml:"replica-set" yaml:"replica-set"`
+	Username         string   `mapstructure:"username" json:"username" toml:"username" yaml:"username"`
+	Password         string   `mapstructure:"password" json:"password" toml:"password" yaml:"password"`
+	AuthSource       string   `mapstructure:"auth-source" json:"auth-source" toml:"auth-source" yaml:"auth-source"`
 	StartPosition    Position `mapstructure:"start-position" yaml:"start-position" toml:"start-position"`
 	CommitInterval   int64    `mapstructure:"commit-interval" json:"commit-interval" yaml:"commit-interval" toml:"commit-interval"`
 	CommitCount      int64    `mapstructure:"commit-count" json:"commit-count" yaml:"commit-count" toml:"commit-count"`
 	BufferCapacity   int      `mapstructure:"buffer-capacity" yaml:"buffer-capacity" json:"buffer-capacity"`
 	ReaderBufferTime int      `mapstructure:"reader-buffer-time" yaml:"reader-buffer-time" toml:"reader-buffer-time"`
+}
+
+func (c *ReaderConfig) validateAndSetDefault() error {
+	if len(c.Host) == 0 {
+		return fmt.Errorf("mongo_schema config urls is empty")
+	}
+	if c.Username == "" {
+		return fmt.Errorf("mongo_schema config username is empty")
+	}
+	if c.Password == "" {
+		return fmt.Errorf("mongo_schema config password is empty")
+	}
+	if c.AuthSource == "" {
+		c.AuthSource = "admin"
+	}
+	return nil
+}
+
+func (c *ReaderConfig) connect() (*mongo.Client, error) {
+	if err := c.validateAndSetDefault(); err != nil {
+		return nil, errors.Trace(err)
+	}
+	hosts := strings.Join(c.Host, ",")
+	url := fmt.Sprintf("mongodb://%s", hosts)
+	if c.ReplicaSet != "" {
+		url = fmt.Sprintf("%s/?replicaSet=%s", url, c.ReplicaSet)
+	}
+	clientOps := options.Client().ApplyURI(url).SetAuth(options.Credential{
+		AuthSource: c.AuthSource,
+		Username:   c.Username,
+		Password:   c.Password,
+	})
+	clientOps.SetReadPreference(readpref.Primary())
+	clientOps.SetConnectTimeout(0)
+	ctx := context.Background()
+
+	client, err := mongo.Connect(ctx, clientOps)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
+		return nil, errors.Trace(err)
+	}
+	return client, nil
 }
 
 type Reader struct {
@@ -82,9 +134,7 @@ func (r *Reader) Run() error {
 	}
 	r.eventReader.SetQueryTimestampOnEmpty(r.currentPosition)
 	r.eventReader.Start()
-	metricsTime := time.Now()
 	for {
-
 		rowlogs, err := r.eventReader.Next()
 		if err != nil {
 			return errors.Trace(err)
@@ -112,8 +162,6 @@ func (r *Reader) Run() error {
 		}
 
 		r.eventHandler.SyncedTimestamp(event.ClusterTime.T)
-		input_metrics.StreamDuration.WithLabelValues(r.pipeline).Observe(time.Now().Sub(metricsTime).Seconds())
-		metricsTime = time.Now()
 		// 处理各种操作类型的事件
 		switch event.OperationType {
 		case insertOperation:

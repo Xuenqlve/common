@@ -53,7 +53,6 @@ const (
 )
 
 func MongoDBStreamConn(ctx context.Context, client *mongo.Client, batchSize int32, watchStartTime any) (conn *mongo.ChangeStream, err error) {
-
 	waitTime := changeStreamTimeout * time.Hour // hours
 	ops := &options.ChangeStreamOptions{
 		MaxAwaitTime: &waitTime,
