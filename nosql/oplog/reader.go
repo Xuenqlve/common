@@ -3,14 +3,13 @@ package oplog
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/xuenqlve/common/data_source/mongodb"
 	"github.com/xuenqlve/common/errors"
 	"github.com/xuenqlve/common/log"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+
 	//input_metrics "github.com/xuenqlve/timburr/pkg/metrics/input"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -30,48 +29,18 @@ type ReaderConfig struct {
 	ReaderBufferTime int      `mapstructure:"reader-buffer-time" yaml:"reader-buffer-time" toml:"reader-buffer-time"`
 }
 
-func (c *ReaderConfig) validateAndSetDefault() error {
-	if len(c.Host) == 0 {
-		return fmt.Errorf("mongo_schema config urls is empty")
-	}
-	if c.Username == "" {
-		return fmt.Errorf("mongo_schema config username is empty")
-	}
-	if c.Password == "" {
-		return fmt.Errorf("mongo_schema config password is empty")
-	}
-	if c.AuthSource == "" {
-		c.AuthSource = "admin"
-	}
-	return nil
-}
-
 func (c *ReaderConfig) connect() (*mongo.Client, error) {
-	if err := c.validateAndSetDefault(); err != nil {
-		return nil, errors.Trace(err)
-	}
-	hosts := strings.Join(c.Host, ",")
-	url := fmt.Sprintf("mongodb://%s", hosts)
-	if c.ReplicaSet != "" {
-		url = fmt.Sprintf("%s/?replicaSet=%s", url, c.ReplicaSet)
-	}
-	clientOps := options.Client().ApplyURI(url).SetAuth(options.Credential{
-		AuthSource: c.AuthSource,
+	cfg := mongodb.Config{
+		Host:       c.Host,
+		ReplicaSet: c.ReplicaSet,
 		Username:   c.Username,
 		Password:   c.Password,
-	})
-	clientOps.SetReadPreference(readpref.Primary())
-	clientOps.SetConnectTimeout(0)
-	ctx := context.Background()
-
-	client, err := mongo.Connect(ctx, clientOps)
-	if err != nil {
-		return nil, errors.Trace(err)
+		AuthSource: c.AuthSource,
 	}
-	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
-		return nil, errors.Trace(err)
+	if err := cfg.ValidateAndSetDefault(); err != nil {
+		return nil, err
 	}
-	return client, nil
+	return cfg.Connect()
 }
 
 type Reader struct {
