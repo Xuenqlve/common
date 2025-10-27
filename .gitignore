@@ -4,6 +4,7 @@
 *.so
 *.dylib
 .vscode
+.idea/
 
 *.test
 
