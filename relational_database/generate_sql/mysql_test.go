@@ -165,4 +165,43 @@ func TestGenerateSQL(t *testing.T) {
 		t.Logf("sql:%v args:%v", statement, args)
 	})
 
+	t.Run("update", func(t *testing.T) {
+		statement, args, err := GenerateUpdateSQL([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 1, "name": "xx1-old", "age": 1, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 2, "name": "xx2-old", "age": 2, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 3, "name": "xx3-old", "age": 3, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 4, "name": "xx4-old", "age": 4, "create_time": "2022-01-01T00:00:00Z"}},
+		}, tableDef, true)
+		if err != nil {
+			t.Error(err)
+		}
+		t.Logf("sql:%v args:%v", statement, args)
+	})
+
+	t.Run("update", func(t *testing.T) {
+		statement, args, err := GenerateUpdateSQL([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 1, "name": "xx1-old", "age": 1, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 2, "name": "xx2-old", "age": 2, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 3, "name": "xx3-old", "age": 3, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 4, "name": "xx4-old", "age": 4, "create_time": "2022-01-01T00:00:00Z"}},
+		}, tableDef, false)
+		if err != nil {
+			t.Error(err)
+		}
+		t.Logf("sql:%v args:%v", statement, args)
+	})
+
+	t.Run("update join", func(t *testing.T) {
+		statement, args, err := GenerateUpdateSQLByJoin([]mysql.RowData{
+			{GuideKeys: map[string]any{"id": 1}, Data: map[string]any{"id": 1, "name": "xx1", "age": 1, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 1, "name": "xx1-old", "age": 1, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 2}, Data: map[string]any{"id": 2, "name": "xx2", "age": 2, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 2, "name": "xx2-old", "age": 2, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 3}, Data: map[string]any{"id": 3, "name": "xx3", "age": 3, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 3, "name": "xx3-old", "age": 3, "create_time": "2022-01-01T00:00:00Z"}},
+			{GuideKeys: map[string]any{"id": 4}, Data: map[string]any{"id": 4, "name": "xx4", "age": 4, "create_time": "2022-01-01T00:00:00Z"}, Old: map[string]any{"id": 4, "name": "xx4-old", "age": 4, "create_time": "2022-01-01T00:00:00Z"}},
+		}, tableDef, false)
+		if err != nil {
+			t.Error(err)
+		}
+		t.Logf("sql:%v args:%v", statement, args)
+	})
+
 }

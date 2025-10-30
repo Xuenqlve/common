@@ -88,6 +88,116 @@ func GenerateReplaceSQL(rows []mysql.RowData, tableDef *mysql.Table) (statement 
 	return generateReplaceSQL(tableDef, batchPlaceHolders), args, nil
 }
 
+func GenerateUpdateSQL(msgBatch []mysql.RowData, tableDef *mysql.Table, isSection bool) (string, []any, error) {
+	statements := make([]string, 0, len(msgBatch))
+	args := make([]any, 0, len(msgBatch)*len(tableDef.Columns))
+	for _, msg := range msgBatch {
+		setInfo, conditionInfo, tmpArgs, err := updateSetInfoAndArgsFromEncodedData(msg, tableDef, isSection)
+		if err != nil {
+			return "", []any{}, errors.Trace(err)
+		}
+		prefix, err := updateSqlPrefix(tableDef, false)
+		if err != nil {
+			return "", []any{}, errors.Trace(err)
+		}
+		statements = append(statements, fmt.Sprintf("%s SET %s WHERE %s", prefix, strings.Join(setInfo, ","), strings.Join(conditionInfo, " AND ")))
+		args = append(args, tmpArgs...)
+	}
+	return strings.Join(statements, ";"), args, nil
+}
+
+// GenerateUpdateSQLByJoin update join
+func GenerateUpdateSQLByJoin(msgBatch []mysql.RowData, tableDef *mysql.Table, isSection bool) (string, []any, error) {
+	prefix, err := updateSqlPrefix(tableDef, false)
+	if err != nil {
+		return "", []any{}, errors.Trace(err)
+	}
+
+	var unionClauses []string
+	var args []any
+
+	for _, row := range msgBatch {
+		if row.GuideKeys == nil || row.Old == nil || row.Data == nil {
+			return "", []any{}, fmt.Errorf("GenerateUpdateSQLByJoin msgBatch contains nil row")
+		}
+		selectValues := make([]string, 0, len(row.GuideKeys)+len(row.Data))
+		selectArgs := make([]any, 0, len(row.GuideKeys)+len(row.Data))
+
+		for _, column := range tableDef.Columns {
+			if _, ok := row.GuideKeys[column.Name]; ok {
+				if _, ok := row.Old[column.Name]; ok {
+					selectValues = append(selectValues, fmt.Sprintf("? AS `%s`", column.Name))
+					selectArgs = append(selectArgs, row.Old[column.Name])
+					continue
+				}
+			}
+			if value, ok := row.Data[column.Name]; ok {
+				selectValues = append(selectValues, fmt.Sprintf("? AS `%s`", column.Name))
+				selectArgs = append(selectArgs, value)
+			} else if isSection {
+				continue
+			} else {
+				return "", []any{}, fmt.Errorf("column `%s` not found in row.Data", column.Name)
+			}
+		}
+
+		unionClauses = append(unionClauses, fmt.Sprintf("SELECT %s", strings.Join(selectValues, ", ")))
+		args = append(args, selectArgs...)
+	}
+
+	//USING
+	usingColumns := make([]string, 0, len(msgBatch[0].GuideKeys))
+	for key := range msgBatch[0].GuideKeys {
+		usingColumns = append(usingColumns, fmt.Sprintf("`%s`", key))
+	}
+
+	//SET
+	setColumns := make([]string, 0, len(tableDef.Columns))
+	keyMap := make(map[string]struct{}, len(msgBatch[0].GuideKeys))
+	for column := range msgBatch[0].GuideKeys {
+		keyMap[column] = struct{}{}
+	}
+
+	for _, column := range tableDef.Columns {
+		if _, ok := keyMap[column.Name]; !ok {
+			continue
+		}
+		var caseStmt strings.Builder
+		caseStmt.WriteString(fmt.Sprintf("a.`%s` = CASE ", column.Name))
+		for _, row := range msgBatch {
+			whenClause := make([]string, 0, len(row.GuideKeys))
+			for keyInfo := range row.GuideKeys {
+				whenClause = append(whenClause, fmt.Sprintf("`%s` = ?", keyInfo))
+				args = append(args, row.Old[keyInfo])
+			}
+			caseStmt.WriteString(fmt.Sprintf(" WHEN %s THEN ? ",
+				strings.Join(whenClause, " AND ")))
+			args = append(args, row.Data[column.Name])
+		}
+		caseStmt.WriteString(" END")
+		setColumns = append(setColumns, caseStmt.String())
+	}
+
+	for key := range msgBatch[0].Data {
+		if _, isPK := msgBatch[0].GuideKeys[key]; !isPK {
+			setColumns = append(setColumns, fmt.Sprintf("a.`%s` = b.`%s`", key, key))
+		}
+	}
+
+	//WHERE
+	whereStatement, whereArgs, err := buildUpdateWhereStatement(msgBatch)
+	args = append(args, whereArgs...)
+
+	sql := fmt.Sprintf("%s a JOIN ( %s ) b USING( %s ) SET %s WHERE %s",
+		prefix,
+		strings.Join(unionClauses, " UNION "),
+		strings.Join(usingColumns, ", "),
+		strings.Join(setColumns, ", "),
+		whereStatement)
+
+	return sql, args, nil
+}
+
 func analysisDeleteArgs(guideKeys map[string]any, inFlag bool) (statement []string, args []any) {
 	whereStatement := make([]string, 0, len(guideKeys))
 	args = make([]any, 0, len(guideKeys))
@@ -239,6 +349,14 @@ func onDuplicateKeyUpdateSQLSuffixByMessage(tableDef *mysql.Table, msgData map[s
 	return fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(columnNamesAssign, ","))
 }
 
+func updateSqlPrefix(tableDef *mysql.Table, updateIgnore bool) (string, error) {
+	if updateIgnore {
+		return fmt.Sprintf("UPDATE IGNORE `%s`.`%s`", tableDef.Database, tableDef.Table), nil
+	} else {
+		return fmt.Sprintf("UPDATE `%s`.`%s` ", tableDef.Database, tableDef.Table), nil
+	}
+}
+
 func getSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef *mysql.Table, bySource bool) (string, []any, error) {
 	if err := validateSchema(data, tableDef); err != nil && !bySource {
 		return "", nil, errors.Trace(err)
@@ -265,6 +383,98 @@ func getSingleSqlPlaceHolderAndArgWithEncodedData(data map[string]any, tableDef 
 	}
 	singleSqlPlaceHolder := fmt.Sprintf("(%s)", strings.Join(placeHolders, ","))
 	return singleSqlPlaceHolder, args, nil
+}
+
+func updateSetInfoAndArgsFromEncodedData(msgBatch mysql.RowData, tableDef *mysql.Table, isSection bool) ([]string, []string, []any, error) {
+	if msgBatch.Data == nil || msgBatch.GuideKeys == nil {
+		return nil, nil, nil, fmt.Errorf("data or guideKeys are nil")
+	}
+	setInfo := make([]string, 0, len(tableDef.Columns))
+	conditionInfo := make([]string, 0, len(msgBatch.GuideKeys))
+	args := make([]any, 0, len(tableDef.Columns)+len(msgBatch.GuideKeys))
+	conditionArgs := make([]any, 0, len(msgBatch.GuideKeys))
+	data := msgBatch.Data
+	guideKeys := msgBatch.GuideKeys
+	oldData := msgBatch.Old
+
+	for _, column := range tableDef.Columns {
+		columnName := column.Name
+		_, ok := guideKeys[columnName]
+		if ok {
+			if keyData, exist := oldData[columnName]; exist {
+				singleConditionInfo := fmt.Sprintf("`%s` = ?", columnName)
+				conditionInfo = append(conditionInfo, singleConditionInfo)
+				conditionArgs = append(conditionArgs, adjustArgs(keyData, &column))
+			} else {
+				return nil, nil, nil, fmt.Errorf("old data not found by key column: %s", columnName)
+			}
+
+		}
+		columnData, ok := data[columnName]
+		if !ok {
+			if isSection {
+				continue
+			}
+			return nil, nil, nil, errors.Errorf("db:%s, table:%s, column:%s missing data", tableDef.Database, tableDef.Table, columnName)
+		}
+		args = append(args, adjustArgs(columnData, &column))
+		singleSetInfo := fmt.Sprintf("`%s` = ?", columnName)
+		setInfo = append(setInfo, singleSetInfo)
+	}
+	for _, conditionArg := range conditionArgs {
+		args = append(args, conditionArg)
+	}
+	return setInfo, conditionInfo, args, nil
+}
+
+func buildUpdateWhereStatement(msgBatch []mysql.RowData) (string, []any, error) {
+	var inFlag bool
+	var guideKey string
+	batchStatement := []string{}
+	batchArgs := []any{}
+
+	if len(msgBatch) == 0 {
+		return "", nil, fmt.Errorf("empty msgBatch")
+	}
+
+	guideKeys := msgBatch[0].GuideKeys
+	if len(guideKeys) == 1 {
+		inFlag = true
+		for key := range guideKeys {
+			guideKey = key
+		}
+	}
+	for _, msgContent := range msgBatch {
+		gKeys := msgContent.GuideKeys
+		whereStatement := make([]string, 0, len(gKeys))
+		args := make([]any, 0, len(gKeys))
+		for key, _ := range gKeys {
+			col := sql_tool.ColumnName(key)
+			if inFlag {
+				whereStatement = append(whereStatement, "?")
+			} else {
+				whereStatement = append(whereStatement, fmt.Sprintf("%s = ?", col))
+			}
+			if _, ok := msgContent.Old[key]; !ok {
+				return "", nil, fmt.Errorf("key %s not found in msgBatch.Old", key)
+			}
+			args = append(args, msgContent.Old[key])
+		}
+
+		if inFlag {
+			batchStatement = append(batchStatement, whereStatement...)
+		} else {
+			batchStatement = append(batchStatement, fmt.Sprintf("(%s)", strings.Join(whereStatement, " AND ")))
+		}
+		batchArgs = append(batchArgs, args...)
+	}
+	var whereStatement string
+	if inFlag {
+		whereStatement = fmt.Sprintf("%s in (%s) ", guideKey, strings.Join(batchStatement, ","))
+	} else {
+		whereStatement = fmt.Sprintf(" %s ", strings.Join(batchStatement, " OR "))
+	}
+	return whereStatement, batchArgs, nil
 }
 
 func validateSchema(data map[string]any, tableDef *mysql.Table) error {
