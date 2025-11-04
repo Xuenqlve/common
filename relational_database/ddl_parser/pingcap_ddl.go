@@ -591,7 +591,7 @@ func (s *PingCapStatement) TruncateTableStmt(stmt ast.TruncateTableStmt) (string
 }
 
 func (s *PingCapStatement) CreateIndexStmt(stmt ast.CreateIndexStmt) (string, error) {
-	stmt.IfNotExists = true
+	stmt.IfNotExists = false
 	if value, ok := s.changeEvent[ddl_parser.ReplaceDatabase]; ok {
 		database, ok := value.(string)
 		if !ok {
@@ -653,7 +653,7 @@ func (s *PingCapStatement) CreateIndexStmt(stmt ast.CreateIndexStmt) (string, er
 }
 
 func (s *PingCapStatement) DropIndexStmt(stmt ast.DropIndexStmt) (string, error) {
-	stmt.IfExists = true
+	stmt.IfExists = false
 	if value, ok := s.changeEvent[ddl_parser.ReplaceDatabase]; ok {
 		database, ok := value.(string)
 		if !ok {
